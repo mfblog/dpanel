@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	exec2 "os/exec"
@@ -35,11 +36,18 @@ func (self Store) SyncByGit(path, gitUrl string) error {
 	if _, err := exec2.LookPath("git"); err != nil {
 		return errors.New("同步商店仓库需要使用 git 命令，请先安装")
 	}
+	// 先创建一个临时目录，下载完成后再同步数据，否则失败时原先的数据会被删除
+	tempDownloadPath, _ := os.MkdirTemp("", "dpanel-store")
+	defer func() {
+		_ = os.RemoveAll(tempDownloadPath)
+	}()
+	slog.Debug("store git download", "path", tempDownloadPath)
+
 	out, err := exec.Command{}.Run(&exec.RunCommandOption{
 		CmdName: "git",
 		CmdArgs: []string{
 			"clone", "--depth", "1",
-			gitUrl, path,
+			gitUrl, tempDownloadPath,
 		},
 		Timeout: time.Second * 30,
 	})
@@ -47,6 +55,14 @@ func (self Store) SyncByGit(path, gitUrl string) error {
 		return err
 	}
 	_, err = io.Copy(os.Stdout, out)
+	if err != nil {
+		return err
+	}
+	err = os.RemoveAll(path)
+	if err != nil {
+		return err
+	}
+	err = os.CopyFS(path, os.DirFS(tempDownloadPath))
 	if err != nil {
 		return err
 	}
@@ -206,6 +222,7 @@ func (self Store) GetAppByOnePanel(storePath string) ([]accessor.StoreAppItem, e
 				storeItem.Description = yamlData.GetString("additionalProperties.shortDescZh")
 				storeItem.Tag = yamlData.GetStringSlice("additionalProperties.tags")
 				storeItem.Website = yamlData.GetString("additionalProperties.website")
+				storeItem.Title = yamlData.GetString("additionalProperties.name")
 			}
 
 			// 版本配置信息一个 data.yaml 为一个版本
@@ -244,14 +261,15 @@ func (self Store) GetAppByOnePanel(storePath string) ([]accessor.StoreAppItem, e
 			storeVersionItem.Name = segments[1]
 		}
 
+		r := time.Now().Unix()
 		if strings.HasSuffix(relPath, "logo.png") {
 			logoPath, _ := filepath.Rel(filepath.Dir(filepath.Dir(storePath)), path)
-			storeItem.Logo = fmt.Sprintf("image://%s", logoPath)
+			storeItem.Logo = fmt.Sprintf("image://%s?r=%d", logoPath, r)
 		}
 
 		if strings.HasSuffix(relPath, "README.md") {
 			readmePath, _ := filepath.Rel(filepath.Dir(filepath.Dir(storePath)), path)
-			storeItem.Content = fmt.Sprintf("markdown-file://%s", readmePath)
+			storeItem.Content = fmt.Sprintf("markdown-file://%s?r=%d", readmePath, r)
 		}
 
 		return nil
@@ -294,7 +312,7 @@ func (self Store) GetAppByCasaos(storePath string) ([]accessor.StoreAppItem, err
 				Version: make(map[string]accessor.StoreAppVersionItem),
 			}
 		}
-
+		r := time.Now().Unix()
 		if strings.HasSuffix(relPath, "docker-compose.yml") {
 			content, err := os.ReadFile(path)
 			if err != nil {
@@ -324,7 +342,7 @@ func (self Store) GetAppByCasaos(storePath string) ([]accessor.StoreAppItem, err
 
 		if strings.HasSuffix(relPath, "README.md") {
 			readmePath, _ := filepath.Rel(filepath.Dir(filepath.Dir(storePath)), path)
-			storeItem.Content = fmt.Sprintf("markdown-file://%s", readmePath)
+			storeItem.Content = fmt.Sprintf("markdown-file://%s?r=%d", readmePath, r)
 		}
 		return nil
 	})

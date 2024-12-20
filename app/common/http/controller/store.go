@@ -145,12 +145,7 @@ func (self Store) Sync(http *gin.Context) {
 		return
 	}
 	storeRootPath := filepath.Join(storage.Local{}.GetStorePath(), params.Name)
-	err := os.RemoveAll(storeRootPath)
-	if err != nil {
-		self.JsonResponseWithError(http, err, 500)
-		return
-	}
-
+	var err error
 	appList := make([]accessor.StoreAppItem, 0)
 	if params.Type == accessor.StoreTypeOnePanel {
 		err = logic.Store{}.SyncByGit(storeRootPath, params.Url)
@@ -208,6 +203,7 @@ func (self Store) Deploy(http *gin.Context) {
 	type ParamsValidate struct {
 		StoreId     int32              `json:"storeId" binding:"required"`
 		Name        string             `json:"name" binding:"required"`
+		Title       string             `json:"title"`
 		ComposeFile string             `json:"composeFile" binding:"required"`
 		Environment []accessor.EnvItem `json:"environment"`
 	}
@@ -228,7 +224,7 @@ func (self Store) Deploy(http *gin.Context) {
 	}
 	composeNew := &entity.Compose{
 		Name:  strings.ToLower(params.Name),
-		Title: "",
+		Title: params.Title,
 		Yaml:  "",
 		Setting: &accessor.ComposeSettingOption{
 			Status:      "waiting",
